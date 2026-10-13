@@ -1,0 +1,24 @@
+{
+  "name": "cosmolights",
+  "version": "1.0.0",
+  "description": "Software ligero e independiente de control y sincronización **Ambilight** en tiempo real para tiras LED basadas en el controlador QinHeng Electronics (**VID: `0x1A86`**, **PID: `0xFE07`**).",
+  "main": "index.js",
+  "scripts": {
+    "dev": "vite src/ui/react_src",
+    "build": "vite build"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "@tailwindcss/vite": "^4.3.3",
+    "@vitejs/plugin-react": "^6.1.2",
+    "lucide-react": "^1.54.0",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
+    "tailwindcss": "^4.3.3",
+    "vite": "^8.3.4",
+    "vite-plugin-singlefile": "^2.3.3"
+  }
+}
