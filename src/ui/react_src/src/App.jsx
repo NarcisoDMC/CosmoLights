@@ -57,6 +57,8 @@ export default function App() {
     reverse_order: false,
     zone_offset: 0,
     aspect_ratio: 'auto',
+    black_cutoff: 15,
+    gamma: 2.0,
   });
 
   // Telemetry stats

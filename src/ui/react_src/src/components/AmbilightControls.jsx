@@ -21,6 +21,8 @@ export default function AmbilightControls({
     saturation_boost = 1.25,
     target_fps = 30,
     aspect_ratio = 'auto',
+    black_cutoff = 15,
+    gamma = 2.0,
   } = config;
 
   const handleStartSideChange = (e) => {
@@ -332,6 +334,50 @@ export default function AmbilightControls({
             <div className="flex justify-between text-[11px] text-slate-500">
               <span>Natural (1.0x)</span>
               <span>Ultra Vibrante (2.0x)</span>
+            </div>
+          </div>
+
+          {/* Umbral de Corte de Negros */}
+          <div className="flex flex-col gap-1.5">
+            <div className="flex justify-between items-center text-xs font-medium text-slate-400">
+              <span>Umbral de Corte de Negros</span>
+              <span className="text-purple-400 font-bold">{black_cutoff}</span>
+            </div>
+            <input
+              type="range"
+              min="0"
+              max="40"
+              step="1"
+              value={black_cutoff}
+              onChange={(e) => onUpdateConfig({ black_cutoff: parseInt(e.target.value, 10) })}
+              className="my-1 cursor-pointer"
+            />
+            <div className="flex justify-between text-[11px] text-slate-500">
+              <span>Sensible (0)</span>
+              <span>Recomendado (15)</span>
+              <span>Agresivo (40)</span>
+            </div>
+          </div>
+
+          {/* Corrección Gamma Óptica */}
+          <div className="flex flex-col gap-1.5">
+            <div className="flex justify-between items-center text-xs font-medium text-slate-400">
+              <span>Corrección Gamma Óptica</span>
+              <span className="text-purple-400 font-bold">{Number(gamma).toFixed(1)}</span>
+            </div>
+            <input
+              type="range"
+              min="10"
+              max="26"
+              step="1"
+              value={Math.round(gamma * 10)}
+              onChange={(e) => onUpdateConfig({ gamma: parseFloat(e.target.value) / 10.0 })}
+              className="my-1 cursor-pointer"
+            />
+            <div className="flex justify-between text-[11px] text-slate-500">
+              <span>Lineal (1.0)</span>
+              <span>Natural (2.0)</span>
+              <span>Profundo (2.6)</span>
             </div>
           </div>
         </div>

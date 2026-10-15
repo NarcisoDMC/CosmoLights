@@ -33,7 +33,8 @@ class AmbilightEngine:
         "start_side": "left",     # "left" (starts bottom-left) or "right" (starts bottom-right)
         "reverse_order": False,   # Invert sequence order
         "zone_offset": 0,         # Shift LED positions (-33 to +33)
-        "black_cutoff": 5,        # Below this luminance, turn LED completely black (0,0,0)
+        "black_cutoff": 15,       # Below this luminance, turn LED completely black (0,0,0)
+        "gamma": 2.0,             # Optical gamma curve for LEDs (1.0 = linear, 2.0-2.2 = realistic deep shadows)
         # Aspect Ratio / Letterbox handling: "auto", "16:9", "21:9", "4:3"
         "aspect_ratio": "auto",
         # Modular 3-strip configuration (Left: 17 LEDs, Top: 29 LEDs, Right: 17 LEDs = 63 LEDs total)
@@ -366,17 +367,36 @@ class AmbilightEngine:
         # Ensure exactly 34 zones
         raw_colors = np.array(u_path[:34], dtype=np.float32)
 
-        # Apply Saturation boost
-        sat = cfg.get("saturation_boost", 1.0)
-        if sat != 1.0:
-            # Luminance = 0.299 R + 0.587 G + 0.114 B
-            gray = 0.299 * raw_colors[:, 0] + 0.587 * raw_colors[:, 1] + 0.114 * raw_colors[:, 2]
-            gray = gray[:, np.newaxis]
-            raw_colors = gray + (raw_colors - gray) * sat
+        # 1. Calculate overall zone luminance (Perceived brightness: Rec.601 / sRGB)
+        # Y = 0.299 R + 0.587 G + 0.114 B
+        gray = (0.299 * raw_colors[:, 0] + 0.587 * raw_colors[:, 1] + 0.114 * raw_colors[:, 2])[:, np.newaxis]
+        zone_luma = gray.ravel()
 
-        # Clip black threshold
-        cutoff = cfg.get("black_cutoff", 5)
-        raw_colors[raw_colors < cutoff] = 0.0
+        # 2. Luma-aware adaptive saturation:
+        # Avoid boosting saturation on shadowy/noisy pixels (Y < 45) to prevent electric color tinting.
+        sat = float(cfg.get("saturation_boost", 1.25))
+        if sat != 1.0:
+            luma_factor = np.clip(gray / 45.0, 0.0, 1.0)
+            effective_sat = 1.0 + (sat - 1.0) * luma_factor
+            raw_colors = gray + (raw_colors - gray) * effective_sat
+
+        # 3. Optical Gamma Correction (Gamma ~ 2.0 - 2.2):
+        # Compensates for the human eye's logarithmic perception vs LED linear light emission.
+        # Deepens shadows naturally while keeping high-key lights vibrant.
+        gamma = float(cfg.get("gamma", 2.0))
+        if gamma != 1.0:
+            raw_colors = 255.0 * np.power(np.clip(raw_colors / 255.0, 0.0, 1.0), gamma)
+
+        # 4. Soft-knee Black Cutoff based on whole-zone luminance:
+        # Instead of clipping channels individually (which causes extreme hue shifts like blue->magenta),
+        # the entire zone (R, G, B) is smoothly attenuated to (0, 0, 0).
+        cutoff = float(cfg.get("black_cutoff", 15))
+        knee_width = 10.0
+        if cutoff > 0.0:
+            # Smooth quadratic transition between cutoff and cutoff + knee_width
+            t = np.clip((zone_luma - cutoff) / knee_width, 0.0, 1.0)
+            soft_falloff = t * t
+            raw_colors = raw_colors * soft_falloff[:, np.newaxis]
 
         return np.clip(raw_colors, 0.0, 255.0)
 

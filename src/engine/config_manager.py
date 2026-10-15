@@ -44,7 +44,8 @@ DEFAULT_APP_CONFIG: Dict[str, Any] = {
     "brightness": 100,
     "border_depth": 0.08,
     "aspect_ratio": "auto",
-    "black_cutoff": 5,
+    "black_cutoff": 15,
+    "gamma": 2.0,
     "selected_monitor": 0,
     # Mode & Color presets
     "last_mode": "ambilight",  # "ambilight", "solid", "effect", "off"
