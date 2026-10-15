@@ -127,7 +127,7 @@ def main():
 
     # Set icon argument for webview if available
     start_kwargs = {
-        "debug": True,
+        "debug": False,
     }
     if icon_path:
         start_kwargs["icon"] = str(icon_path)
