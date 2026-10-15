@@ -2,17 +2,20 @@
 api.py - Python-to-JavaScript Bridge API for CosmoLights.
 
 Exposed directly to the Web UI via pywebview (window.pywebview.api).
-Coordinates LED hardware, screen capture, procedural light patterns,
-audio visualizers, calibration, and live telemetry.
-Includes persistent storage in %APPDATA%/CosmoLights/config.json.
+Coordinates multi-strip orchestration, screen capture pool, procedural lighting,
+audio visualizers, calibration, and live telemetry across all connected hardware.
+Includes persistent storage in %APPDATA%/CosmoLights/config.json without simulated data.
 """
 
 from typing import Dict, Any, List, Optional
 import os
 
+from ..driver.base_driver import BaseLedDriver
 from ..driver.led_driver import LedDriver
+from ..driver.serial_driver import SerialLedDriver
 from ..capture.windows_dxgi import WindowsDXGICapture
-from ..engine.ambilight import AmbilightEngine
+from ..engine.strip_instance import StripInstance
+from ..engine.orchestrator import StripOrchestrator
 from ..engine.effects import CustomEffectsEngine
 from ..engine.config_manager import ConfigManager
 
@@ -25,244 +28,390 @@ class CosmoLightsAPI:
         saved = self.config_mgr.get_all()
 
         monitors = WindowsDXGICapture.list_monitors()
-        valid_indices = [m["output_idx"] for m in monitors]
-        selected_mon = int(saved.get("selected_monitor", 0))
-        if selected_mon not in valid_indices and valid_indices:
-            selected_mon = valid_indices[0]
-            self.config_mgr.set("selected_monitor", selected_mon)
+        valid_mon_indices = [m["output_idx"] for m in monitors]
+        default_mon = valid_mon_indices[0] if valid_mon_indices else 0
 
-        self.driver = LedDriver()
-        self.capture = WindowsDXGICapture(output_idx=selected_mon)
+        self.orchestrator = StripOrchestrator()
 
-        # Initialize engine with saved parameters
-        self.engine = AmbilightEngine(self.driver, self.capture, config=saved)
-        self.effects = CustomEffectsEngine(self.driver)
+        # Load real strips from persistent config or initialize the primary physical strip
+        saved_strips = saved.get("strips")
+        if saved_strips and isinstance(saved_strips, list) and len(saved_strips) > 0:
+            for s_data in saved_strips:
+                s_id = s_data.get("id", "strip_1")
+                name = s_data.get("name", "Tira LED Principal")
+                dev_type = s_data.get("device_type", "qinheng")
+                dev_idx = int(s_data.get("device_index", 0))
+                port = s_data.get("port", "COM3")
+                total_leds = int(s_data.get("total_leds", 63))
+                s_cfg = dict(s_data.get("config", {}))
 
-        self._current_mode = "off"
-        self._current_brightness = int(saved.get("brightness", 100))
-        solid_list = saved.get("last_solid_rgb", [0, 240, 255])
-        self._last_solid = tuple(solid_list) if len(solid_list) == 3 else (0, 240, 255)
+                # Ensure monitor index is valid
+                if s_cfg.get("selected_monitor") not in valid_mon_indices and valid_mon_indices:
+                    s_cfg["selected_monitor"] = default_mon
 
-        self.effects.set_speed(float(saved.get("effect_speed", 1.0)))
-        self.effects.set_audio_sensitivity(float(saved.get("audio_sensitivity", 1.2)))
-        self.effects.set_brightness(self._current_brightness)
+                driver: BaseLedDriver
+                if dev_type == "serial":
+                    driver = SerialLedDriver(port=port, total_leds=total_leds)
+                else:
+                    driver = LedDriver(device_index=dev_idx, total_leds=total_leds)
+
+                instance = StripInstance(
+                    strip_id=s_id,
+                    name=name,
+                    driver=driver,
+                    config=s_cfg
+                )
+                self.orchestrator.add_strip(instance)
+        else:
+            # First run or empty config: Initialize exactly ONE real strip for the primary hardware
+            base_cfg = dict(saved)
+            if base_cfg.get("selected_monitor") not in valid_mon_indices and valid_mon_indices:
+                base_cfg["selected_monitor"] = default_mon
+
+            primary_driver = LedDriver(device_index=0, total_leds=63)
+            primary_strip = StripInstance(
+                strip_id="strip_1",
+                name="Tira LED Principal",
+                driver=primary_driver,
+                config=base_cfg
+            )
+            self.orchestrator.add_strip(primary_strip)
+
+        active_id = saved.get("active_strip_id", "strip_1")
+        self.orchestrator.set_active_strip(active_id)
+
+        # Connect active strip hardware
+        active = self.orchestrator.get_active_strip()
+        if active and not active.driver.is_connected:
+            active.driver.connect()
+
+        self._save_strips_state()
+
+    def _save_strips_state(self) -> None:
+        """Saves current real strip configurations to config.json."""
+        strips_data = []
+        for s in self.orchestrator._strips.values():
+            dev_idx = getattr(s.driver, "device_index", 0)
+            port = getattr(s.driver, "port", "COM3")
+            strips_data.append({
+                "id": s.strip_id,
+                "name": s.name,
+                "device_type": s.driver.driver_type,
+                "device_index": dev_idx,
+                "port": port,
+                "total_leds": getattr(s.driver, "total_leds", 63),
+                "config": s.config,
+            })
+        self.config_mgr.set("strips", strips_data)
+        self.config_mgr.set("active_strip_id", self.orchestrator.active_strip_id)
+
+    @property
+    def active_strip(self) -> Optional[StripInstance]:
+        return self.orchestrator.get_active_strip()
+
+    # -------------------------------------------------------------------------
+    # Core API Endpoints
+    # -------------------------------------------------------------------------
 
     def initialize(self) -> Dict[str, Any]:
         """Initial connection, hardware check and settings restoration."""
-        connected = self.driver.connect()
         monitors = WindowsDXGICapture.list_monitors()
-        valid_indices = [m["output_idx"] for m in monitors]
-        saved = self.config_mgr.get_all()
-        selected_mon = int(saved.get("selected_monitor", 0))
-        if selected_mon not in valid_indices and valid_indices:
-            selected_mon = valid_indices[0]
-            self.config_mgr.set("selected_monitor", selected_mon)
+        active = self.active_strip
+        if active and not active.driver.is_connected:
+            active.driver.connect()
 
-        cfg = dict(self.engine.config)
-        cfg["brightness"] = self._current_brightness
+        connected = active.driver.is_connected if active else False
+        cfg = dict(active.config) if active else {}
+        cfg["brightness"] = active.brightness if active else 100
+
+        strips_list = self.orchestrator.list_strips()
 
         return {
             "connected": connected,
             "monitors": monitors,
-            "selected_monitor": selected_mon,
-            "current_mode": self._current_mode,
+            "strips": strips_list,
+            "active_strip_id": self.orchestrator.active_strip_id,
+            "selected_monitor": cfg.get("selected_monitor", 0),
+            "current_mode": active.mode if active else "off",
             "config": cfg,
-            "brightness": self._current_brightness,
-            "last_solid_rgb": list(self._last_solid),
-            "last_effect_id": saved.get("last_effect_id", "rainbow_flow"),
-            "effect_speed": saved.get("effect_speed", 1.0),
-            "audio_sensitivity": saved.get("audio_sensitivity", 1.2),
-            "effects_list": CustomEffectsEngine.EFFECTS_LIST
+            "brightness": active.brightness if active else 100,
+            "last_solid_rgb": list(active._last_solid) if active else [0, 240, 255],
+            "last_effect_id": active._active_effect if active else "rainbow_flow",
+            "effect_speed": active._effect_speed if active else 1.0,
+            "audio_sensitivity": active._audio_sensitivity if active else 1.2,
+            "effects_list": CustomEffectsEngine.EFFECTS_LIST,
         }
 
     def list_monitors(self) -> List[Dict[str, Any]]:
         """Returns detected monitors with fresh system scan."""
         return WindowsDXGICapture.list_monitors()
 
+    # -------------------------------------------------------------------------
+    # Multi-Strip Management
+    # -------------------------------------------------------------------------
+
+    def list_strips(self) -> List[Dict[str, Any]]:
+        """Returns list of currently configured real strips."""
+        return self.orchestrator.list_strips()
+
+    def set_active_strip(self, strip_id: str) -> Dict[str, Any]:
+        """Switches the UI focused strip and updates connection."""
+        self.orchestrator.set_active_strip(strip_id)
+        self.config_mgr.set("active_strip_id", strip_id)
+        active = self.active_strip
+        if active and not active.driver.is_connected:
+            active.driver.connect()
+
+        return {
+            "success": True,
+            "active_strip_id": self.orchestrator.active_strip_id,
+            "state": active.get_state() if active else None,
+        }
+
+    def enumerate_hardware(self) -> Dict[str, Any]:
+        """Discovers real physical controllers connected to USB and Serial ports."""
+        qinheng_devices = LedDriver.enumerate_devices()
+        serial_ports = SerialLedDriver.list_ports()
+        return {
+            "qinheng": qinheng_devices,
+            "serial": serial_ports,
+        }
+
+    def add_strip(
+        self,
+        name: str,
+        device_type: str = "qinheng",
+        device_index: int = 0,
+        port: str = "COM3",
+        total_leds: int = 63,
+        selected_monitor: int = 0,
+    ) -> Dict[str, Any]:
+        """Adds a newly detected real physical LED strip."""
+        strip_count = len(self.orchestrator._strips) + 1
+        new_id = f"strip_{strip_count}"
+
+        driver: BaseLedDriver
+        if device_type == "serial":
+            driver = SerialLedDriver(port=port, total_leds=int(total_leds))
+        else:
+            driver = LedDriver(device_index=int(device_index), total_leds=int(total_leds))
+
+        new_strip = StripInstance(
+            strip_id=new_id,
+            name=name.strip() or f"Tira LED {strip_count}",
+            driver=driver,
+            config={
+                "selected_monitor": int(selected_monitor),
+                "brightness": 100,
+                "black_cutoff": 15,
+                "gamma": 2.0,
+                "saturation_boost": 1.25,
+                "smoothing": 0.40,
+                "target_fps": 30,
+                "aspect_ratio": "auto",
+            }
+        )
+
+        self.orchestrator.add_strip(new_strip)
+        new_strip.driver.connect()
+        self._save_strips_state()
+
+        return {
+            "success": True,
+            "strip": new_strip.get_state(),
+            "strips": self.orchestrator.list_strips(),
+        }
+
+    def remove_strip(self, strip_id: str) -> Dict[str, Any]:
+        """Removes a secondary strip."""
+        if len(self.orchestrator._strips) <= 1:
+            return {"success": False, "error": "No se puede eliminar la tira principal."}
+
+        success = self.orchestrator.remove_strip(strip_id)
+        if success:
+            self._save_strips_state()
+
+        return {
+            "success": success,
+            "strips": self.orchestrator.list_strips(),
+            "active_strip_id": self.orchestrator.active_strip_id,
+        }
+
+    def rename_strip(self, strip_id: str, new_name: str) -> Dict[str, Any]:
+        """Renames a strip."""
+        strip = self.orchestrator.get_strip(strip_id)
+        if strip:
+            strip.name = new_name.strip()
+            self._save_strips_state()
+            return {"success": True, "name": strip.name}
+        return {"success": False}
+
+    def turn_off_all(self) -> bool:
+        """Master Power Off: Shuts off all configured LED strips."""
+        self.orchestrator.turn_off_all()
+        self._save_strips_state()
+        return True
+
+    def set_master_brightness(self, level: int) -> bool:
+        """Sets brightness across all strips simultaneously."""
+        self.orchestrator.set_master_brightness(level)
+        self._save_strips_state()
+        return True
+
+    # -------------------------------------------------------------------------
+    # Active Strip Delegated Controls (Backward Compatible)
+    # -------------------------------------------------------------------------
+
     def set_monitor(self, output_idx: int) -> bool:
-        """Switches capture to another monitor and saves preference."""
+        """Switches capture monitor for the active strip."""
+        active = self.active_strip
+        if not active:
+            return False
+
         output_idx = int(output_idx)
-        self.config_mgr.set("selected_monitor", output_idx)
-        was_running = self.engine.is_running
-        if was_running:
-            self.engine.stop()
+        active.config["selected_monitor"] = output_idx
 
-        if hasattr(self.capture, "release"):
-            self.capture.release()
+        # Re-bind capture from pool
+        new_capture = self.orchestrator.capture_pool.acquire(output_idx)
+        active.capture = new_capture
 
-        self.capture = WindowsDXGICapture(output_idx=output_idx)
-        self.engine.capture = self.capture
-
-        if was_running:
-            return self.engine.start()
+        self._save_strips_state()
         return True
 
     def toggle_ambilight(self, enable: bool) -> Dict[str, Any]:
-        """Starts or stops the live Ambilight screen capture stream."""
+        """Starts or stops live Ambilight screen capture on the active strip."""
+        active = self.active_strip
+        if not active:
+            return {"success": False, "mode": "off"}
+
         if enable:
-            if self.effects.is_running:
-                self.effects.stop()
-            success = self.engine.start()
-            if success:
-                self._current_mode = "ambilight"
-                self.config_mgr.set("last_mode", "ambilight")
-            return {"success": success, "mode": self._current_mode}
+            success = active.start_ambilight()
         else:
-            self.engine.stop()
-            self._current_mode = "off"
-            self.config_mgr.set("last_mode", "off")
-            return {"success": True, "mode": self._current_mode}
+            active.stop_ambilight()
+            success = True
+
+        self._save_strips_state()
+        return {"success": success, "mode": active.mode}
 
     def set_solid_color(self, r: int, g: int, b: int) -> bool:
-        """Sets a uniform static color on the LED strip and persists it."""
-        if self.engine.is_running:
-            self.engine.stop()
-        if self.effects.is_running:
-            self.effects.stop()
+        """Sets a uniform static color on the active strip."""
+        active = self.active_strip
+        if not active:
+            return False
 
-        self._last_solid = (r, g, b)
-        self.config_mgr.update({
-            "last_solid_rgb": [r, g, b],
-            "last_mode": "solid"
-        })
-
-        if not self.driver.is_connected:
-            if not self.driver.connect():
-                return False
-
-        factor = self._current_brightness / 100.0
-        sr = max(0, min(255, int(r * factor)))
-        sg = max(0, min(255, int(g * factor)))
-        sb = max(0, min(255, int(b * factor)))
-
-        success = self.driver.set_solid_color(sr, sg, sb)
+        success = active.set_solid_color(r, g, b)
         if success:
-            self._current_mode = "solid"
+            self._save_strips_state()
         return success
 
     def set_custom_effect(self, effect_id: str, speed: float = 1.0) -> bool:
-        """Activates a custom software light pattern or audio visualizer and persists it."""
-        if self.engine.is_running:
-            self.engine.stop()
+        """Activates a lighting effect on the active strip."""
+        active = self.active_strip
+        if not active:
+            return False
 
-        if not self.driver.is_connected:
-            if not self.driver.connect():
-                return False
-
-        self.effects.set_speed(speed)
-        success = self.effects.start(effect_id)
+        success = active.set_effect(effect_id, speed)
         if success:
-            self._current_mode = "effect"
-            self.config_mgr.update({
-                "last_effect_id": effect_id,
-                "effect_speed": speed,
-                "last_mode": "effect"
-            })
+            self._save_strips_state()
         return success
 
     def set_effect_speed(self, speed: float) -> bool:
-        """Adjusts the animation speed of the running effect."""
-        self.effects.set_speed(speed)
-        self.config_mgr.set("effect_speed", speed)
-        return True
+        active = self.active_strip
+        if not active:
+            return False
+        res = active.set_effect_speed(speed)
+        self._save_strips_state()
+        return res
 
     def set_audio_sensitivity(self, sens: float) -> bool:
-        """Adjusts the audio reactivity sensitivity."""
-        self.effects.set_audio_sensitivity(sens)
-        self.config_mgr.set("audio_sensitivity", sens)
-        return True
+        active = self.active_strip
+        if not active:
+            return False
+        res = active.set_audio_sensitivity(sens)
+        self._save_strips_state()
+        return res
 
     def set_brightness(self, level: int) -> bool:
-        """Adjusts global brightness (0-100%) and persists."""
-        self._current_brightness = max(0, min(100, int(level)))
-        self.engine.update_config({"brightness": self._current_brightness})
-        self.effects.set_brightness(self._current_brightness)
-        self.config_mgr.set("brightness", self._current_brightness)
-
-        # If solid color mode is active, update the hardware solid color with the scaled RGB
-        if self._current_mode == "solid":
-            r, g, b = self._last_solid
-            factor = self._current_brightness / 100.0
-            sr = max(0, min(255, int(r * factor)))
-            sg = max(0, min(255, int(g * factor)))
-            sb = max(0, min(255, int(b * factor)))
-            if self.driver.is_connected:
-                self.driver.set_solid_color(sr, sg, sb)
-
-        return True
+        """Adjusts brightness on the active strip."""
+        active = self.active_strip
+        if not active:
+            return False
+        res = active.set_brightness(level)
+        self._save_strips_state()
+        return res
 
     def turn_off(self) -> bool:
-        """Turns off the LEDs."""
-        if self.engine.is_running:
-            self.engine.stop()
-        if self.effects.is_running:
-            self.effects.stop()
-
-        if self.driver.is_connected:
-            self.driver.turn_off()
-
-        self._current_mode = "off"
-        self.config_mgr.set("last_mode", "off")
-        return True
+        """Turns off the active strip."""
+        active = self.active_strip
+        if not active:
+            return False
+        res = active.turn_off()
+        self._save_strips_state()
+        return res
 
     def update_config(self, new_config: Dict[str, Any]) -> Dict[str, Any]:
-        """Updates ambilight parameters and writes to disk."""
-        self.engine.update_config(new_config)
-        self.config_mgr.update(new_config)
-        return {"success": True, "config": self.engine.config}
+        """Updates parameters for the active strip."""
+        active = self.active_strip
+        if not active:
+            return {"success": False, "config": {}}
+        active.update_config(new_config)
+        self._save_strips_state()
+        return {"success": True, "config": active.config}
 
     def set_orientation(self, start_side: str, reverse_order: bool, zone_offset: int) -> Dict[str, Any]:
-        """Calibrates the 3-module physical LED strip mapping and saves."""
-        self.engine.set_orientation(
-            start_side=start_side,
-            reverse=bool(reverse_order),
-            offset=int(zone_offset)
-        )
-        self.config_mgr.update({
+        """Calibrates physical strip mapping for the active strip."""
+        return self.update_config({
             "start_side": start_side,
             "reverse_order": bool(reverse_order),
             "zone_offset": int(zone_offset)
         })
-        return {"success": True, "config": self.engine.config}
 
     def get_stats(self) -> Dict[str, Any]:
-        """Returns live FPS, running state, and current LED colors for UI preview."""
-        if self._current_mode == "effect" and self.effects.is_running:
-            stats = self.effects.get_stats()
-            stats["running"] = False
-            stats["is_ambilight_running"] = False
-            stats["frames_processed"] = "-"
-        elif self._current_mode == "solid":
-            r, g, b = self._last_solid
-            factor = self._current_brightness / 100.0
-            sr = max(0, min(255, int(r * factor)))
-            sg = max(0, min(255, int(g * factor)))
-            sb = max(0, min(255, int(b * factor)))
-            stats = {
+        """Returns live FPS, running state, and current LED preview for the active strip."""
+        active = self.active_strip
+        if not active:
+            return {
                 "running": False,
                 "is_ambilight_running": False,
-                "paused": False,
+                "current_mode": "off",
+                "connected": False,
+                "brightness": 100,
                 "fps": 0.0,
-                "target_fps": 0,
+                "target_fps": 30,
                 "frames_processed": "-",
-                "start_side": self.engine.config.get("start_side", "left"),
-                "reverse_order": self.engine.config.get("reverse_order", False),
-                "zone_offset": self.engine.config.get("zone_offset", 0),
-                "led_preview": [[sr, sg, sb]] * 34
+                "start_side": "left",
+                "reverse_order": False,
+                "zone_offset": 0,
+                "led_preview": [[0, 0, 0]] * 34,
+                "strips": self.orchestrator.list_strips(),
+                "active_strip_id": None,
             }
-        else:
-            stats = self.engine.get_stats()
-            stats["is_ambilight_running"] = self.engine.is_running and self._current_mode == "ambilight"
-            stats["running"] = stats["is_ambilight_running"]
 
-        stats["current_mode"] = self._current_mode
-        stats["connected"] = self.driver.is_connected
-        stats["brightness"] = self._current_brightness
+        state = active.get_state()
+        is_ambi = (state["mode"] == "ambilight")
+        stats = {
+            "running": is_ambi,
+            "is_ambilight_running": is_ambi,
+            "paused": False,
+            "fps": state["fps"],
+            "target_fps": active.config.get("target_fps", 30),
+            "frames_processed": state["frames_processed"],
+            "start_side": active.config.get("start_side", "left"),
+            "reverse_order": active.config.get("reverse_order", False),
+            "zone_offset": active.config.get("zone_offset", 0),
+            "detected_aspect": state["detected_aspect"],
+            "crop_top_pct": state["crop_top_pct"],
+            "led_preview": state["led_preview"],
+            "current_mode": state["mode"],
+            "connected": state["connected"],
+            "brightness": state["brightness"],
+            "strips": self.orchestrator.list_strips(),
+            "active_strip_id": self.orchestrator.active_strip_id,
+        }
         return stats
 
     def shutdown(self) -> None:
         """Clean shutdown when closing the application window."""
-        self.turn_off()
-        if self.capture.is_active:
-            self.capture.stop()
-        self.driver.disconnect()
+        self.orchestrator.turn_off_all()
+        for s in self.orchestrator._strips.values():
+            s.driver.disconnect()
