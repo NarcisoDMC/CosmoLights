@@ -1,6 +1,16 @@
 """
-Driver package for QinHeng (1A86:FE07) LED Controller.
+driver package - Hardware & Simulated Drivers for CosmoLights.
 """
-from .led_driver import LedDriver
 
-__all__ = ["LedDriver"]
+from .base_driver import BaseLedDriver
+from .led_driver import LedDriver, QinHengDriver
+from .mock_driver import MockLedDriver
+from .serial_driver import SerialLedDriver
+
+__all__ = [
+    "BaseLedDriver",
+    "LedDriver",
+    "QinHengDriver",
+    "MockLedDriver",
+    "SerialLedDriver",
+]

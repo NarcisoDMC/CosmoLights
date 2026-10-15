@@ -247,11 +247,11 @@ export default function AmbilightControls({
         </div>
       </div>
 
-      {/* Screen & Image Tuning Card */}
+      {/* Screen & Capture Settings Card */}
       <div className="bg-[#10131e]/90 border border-[#22273d] rounded-2xl p-5 flex flex-col gap-4 backdrop-blur-md shadow-lg">
         <div className="text-sm font-bold text-white flex items-center gap-2 border-b border-[#22273d]/70 pb-3">
           <Sliders className="w-4 h-4 text-purple-400" />
-          Ajustes de Pantalla e Imagen
+          Ajustes de Pantalla y Captura
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -298,9 +298,9 @@ export default function AmbilightControls({
           </div>
 
           {/* Smoothing */}
-          <div className="flex flex-col gap-1.5">
+          <div className="flex flex-col gap-1.5 md:col-span-2">
             <div className="flex justify-between items-center text-xs font-medium text-slate-400">
-              <span>Suavizado de Transición</span>
+              <span>Suavizado de Transición Temporal</span>
               <span className="text-purple-400 font-bold">{Number(smoothing).toFixed(2)}</span>
             </div>
             <input
@@ -312,13 +312,28 @@ export default function AmbilightControls({
               className="my-1 cursor-pointer"
             />
             <div className="flex justify-between text-[11px] text-slate-500">
-              <span>Cine Suave (0.10)</span>
-              <span>Gaming Rápido (1.00)</span>
+              <span>Cine Suave y Progresivo (0.10)</span>
+              <span>Respuesta Instantánea Gaming (1.00)</span>
             </div>
           </div>
+        </div>
+      </div>
 
+      {/* Color Configuration & Optical Processing Card */}
+      <div className="bg-[#10131e]/90 border border-[#22273d] rounded-2xl p-5 flex flex-col gap-4 backdrop-blur-md shadow-lg">
+        <div className="flex items-center justify-between border-b border-[#22273d]/70 pb-3">
+          <div className="text-sm font-bold text-white flex items-center gap-2">
+            <Palette className="w-4 h-4 text-purple-400" />
+            Configuración de Colores y Procesamiento Óptico
+          </div>
+          <span className="text-[11px] text-purple-400/80 font-mono">
+            Calibración LED
+          </span>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           {/* Saturation Boost */}
-          <div className="flex flex-col gap-1.5">
+          <div className="flex flex-col gap-1.5 bg-[#161a29]/60 border border-[#22273d] rounded-xl p-3.5">
             <div className="flex justify-between items-center text-xs font-medium text-slate-400">
               <span>Realce de Saturación</span>
               <span className="text-purple-400 font-bold">{Number(saturation_boost).toFixed(2)}x</span>
@@ -331,16 +346,16 @@ export default function AmbilightControls({
               onChange={(e) => onUpdateConfig({ saturation_boost: parseFloat(e.target.value) / 100.0 })}
               className="my-1 cursor-pointer"
             />
-            <div className="flex justify-between text-[11px] text-slate-500">
+            <div className="flex justify-between text-[10px] text-slate-500">
               <span>Natural (1.0x)</span>
-              <span>Ultra Vibrante (2.0x)</span>
+              <span>Vibrante (2.0x)</span>
             </div>
           </div>
 
           {/* Umbral de Corte de Negros */}
-          <div className="flex flex-col gap-1.5">
+          <div className="flex flex-col gap-1.5 bg-[#161a29]/60 border border-[#22273d] rounded-xl p-3.5">
             <div className="flex justify-between items-center text-xs font-medium text-slate-400">
-              <span>Umbral de Corte de Negros</span>
+              <span>Corte de Negros (Umbral)</span>
               <span className="text-purple-400 font-bold">{black_cutoff}</span>
             </div>
             <input
@@ -352,15 +367,14 @@ export default function AmbilightControls({
               onChange={(e) => onUpdateConfig({ black_cutoff: parseInt(e.target.value, 10) })}
               className="my-1 cursor-pointer"
             />
-            <div className="flex justify-between text-[11px] text-slate-500">
+            <div className="flex justify-between text-[10px] text-slate-500">
               <span>Sensible (0)</span>
-              <span>Recomendado (15)</span>
-              <span>Agresivo (40)</span>
+              <span>Fuerte (40)</span>
             </div>
           </div>
 
           {/* Corrección Gamma Óptica */}
-          <div className="flex flex-col gap-1.5">
+          <div className="flex flex-col gap-1.5 bg-[#161a29]/60 border border-[#22273d] rounded-xl p-3.5">
             <div className="flex justify-between items-center text-xs font-medium text-slate-400">
               <span>Corrección Gamma Óptica</span>
               <span className="text-purple-400 font-bold">{Number(gamma).toFixed(1)}</span>
@@ -374,9 +388,8 @@ export default function AmbilightControls({
               onChange={(e) => onUpdateConfig({ gamma: parseFloat(e.target.value) / 10.0 })}
               className="my-1 cursor-pointer"
             />
-            <div className="flex justify-between text-[11px] text-slate-500">
+            <div className="flex justify-between text-[10px] text-slate-500">
               <span>Lineal (1.0)</span>
-              <span>Natural (2.0)</span>
               <span>Profundo (2.6)</span>
             </div>
           </div>

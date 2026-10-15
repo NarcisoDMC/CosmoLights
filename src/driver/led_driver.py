@@ -5,15 +5,17 @@ Decoded via Wireshark USB reverse engineering.
 Communicates directly with USB Interface 0, Endpoint 0x01 using 64-byte raw packets.
 """
 
-from typing import List, Tuple, Optional
+from typing import List, Tuple, Optional, Dict, Any
 import threading
 import time
 import usb.core
 import usb.util
 import libusb_package
 
+from .base_driver import BaseLedDriver
 
-class LedDriver:
+
+class LedDriver(BaseLedDriver):
     # Hardware IDs (QinHeng Electronics USB Composite Device)
     VID = 0x1A86
     PID = 0xFE07
@@ -45,8 +47,17 @@ class LedDriver:
         (57, 58), (59, 60), (61, 62), (63, 63)
     ]
 
-    def __init__(self, total_leds: int = TOTAL_LEDS):
+    def __init__(
+        self,
+        total_leds: int = TOTAL_LEDS,
+        device_index: int = 0,
+        bus: Optional[int] = None,
+        address: Optional[int] = None
+    ):
         self.total_leds = total_leds
+        self.device_index = int(device_index)
+        self._bus = bus
+        self._address = address
         self._dev: Optional[usb.core.Device] = None
         self._ep_out = None
         self._seq = 1
@@ -60,18 +71,73 @@ class LedDriver:
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.disconnect()
 
+    @classmethod
+    def enumerate_devices(cls) -> List[Dict[str, Any]]:
+        """
+        Discovers and lists all connected QinHeng LED controllers.
+        Returns metadata for each physical device found on the USB bus.
+        """
+        devices = []
+        try:
+            found = list(libusb_package.find(find_all=True, idVendor=cls.VID, idProduct=cls.PID))
+            for idx, dev in enumerate(found):
+                devices.append({
+                    "device_index": idx,
+                    "type": "qinheng",
+                    "vid": hex(cls.VID),
+                    "pid": hex(cls.PID),
+                    "bus": getattr(dev, "bus", None),
+                    "address": getattr(dev, "address", None),
+                    "port": getattr(dev, "port_number", None),
+                    "id": f"qinheng_b{getattr(dev, 'bus', idx)}_a{getattr(dev, 'address', idx)}"
+                })
+        except Exception as e:
+            print(f"[LedDriver] Error enumerating USB devices: {e}")
+        return devices
+
     @property
     def is_connected(self) -> bool:
         return self._is_connected and self._dev is not None
 
+    @property
+    def driver_type(self) -> str:
+        return "qinheng"
+
+    @property
+    def device_info(self) -> Dict[str, Any]:
+        return {
+            "type": "qinheng",
+            "device_index": self.device_index,
+            "bus": getattr(self._dev, "bus", self._bus),
+            "address": getattr(self._dev, "address", self._address),
+            "connected": self.is_connected,
+            "total_leds": self.total_leds,
+        }
+
     def connect(self) -> bool:
-        """Finds and claims the USB LED strip controller."""
+        """Finds and claims the targeted USB LED strip controller."""
         try:
-            # Find device using libusb-package backend
-            self._dev = libusb_package.find(idVendor=self.VID, idProduct=self.PID)
-            if self._dev is None:
+            # Find all matching QinHeng devices
+            devs = list(libusb_package.find(find_all=True, idVendor=self.VID, idProduct=self.PID))
+            if not devs:
                 print(f"[LedDriver] Device {hex(self.VID)}:{hex(self.PID)} not found.")
                 return False
+
+            # Select device matching bus/address or by device_index
+            target_dev = None
+            if self._bus is not None and self._address is not None:
+                for d in devs:
+                    if getattr(d, "bus", None) == self._bus and getattr(d, "address", None) == self._address:
+                        target_dev = d
+                        break
+
+            if target_dev is None:
+                if self.device_index < len(devs):
+                    target_dev = devs[self.device_index]
+                else:
+                    target_dev = devs[0]
+
+            self._dev = target_dev
 
             # On Linux/macOS, detach kernel driver if bound
             try:
@@ -100,7 +166,9 @@ class LedDriver:
                 return False
 
             self._is_connected = True
-            print("[LedDriver] Connected successfully to LED Strip controller.")
+            dev_bus = getattr(self._dev, "bus", "?")
+            dev_addr = getattr(self._dev, "address", "?")
+            print(f"[LedDriver] Connected successfully to QinHeng LED Controller (Index: {self.device_index}, Bus: {dev_bus}, Addr: {dev_addr}).")
             return True
 
         except Exception as e:
@@ -302,7 +370,8 @@ class LedDriver:
             return True
         except usb.core.USBError as e:
             print(f"[LedDriver] Sync frame transfer error: {e}")
-            return False
+# Alias for clean multi-driver architecture
+QinHengDriver = LedDriver
 
 
 # ---------------------------------------------------------------------------
