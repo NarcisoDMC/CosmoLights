@@ -1,5 +1,5 @@
 import React from 'react';
-import { Play, Square, Compass, Sliders, Layers, Info, Film, Sparkles, RefreshCw } from 'lucide-react';
+import { Play, Square, Compass, Sliders, Layers, Info, Film, Sparkles, RefreshCw, Palette } from 'lucide-react';
 
 export default function AmbilightControls({
   isRunning,
