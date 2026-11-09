@@ -27,6 +27,40 @@ Diseñado específicamente para configuraciones físicas modulares de 3 tiras LE
 
 ---
 
+## Capturas de Pantalla
+
+### 1. Panel Principal Ambilight y Monitor Virtual en Vivo
+Vista en tiempo real de las 34 zonas lógicas (63 LEDs físicos), gestión multitira y control maestro de transmisión:
+<p align="center">
+  <img src="docs/screenshots/01-ambilight-monitor.png" alt="Panel Principal Ambilight y Monitor Virtual" width="90%" />
+</p>
+
+### 2. Compensación de Barras Negras (Letterbox) y Calibración Modular
+Detección adaptativa de formato de pantalla (`Automático`, `16:9`, `21:9 UltraWide`, `4:3 Pillarbox`) y orientación física de las 3 tiras con ajuste fino de zonas (*offset*):
+<p align="center">
+  <img src="docs/screenshots/02-letterbox-calibracion.png" alt="Formato de Pantalla Letterbox y Calibración Modular" width="90%" />
+</p>
+
+### 3. Ajustes de Pantalla, Captura y Procesamiento Óptico LED
+Selección de monitor en vivo (`30/60 FPS`), suavizado temporal exponencial (EMA), realce de saturación, umbral de corte de negros y corrección gamma óptica:
+<p align="center">
+  <img src="docs/screenshots/03-captura-procesamiento-optico.png" alt="Ajustes de Captura y Procesamiento Óptico" width="90%" />
+</p>
+
+### 4. Modo Color Fijo (Rueda Cromática HSV y Paleta Rápida)
+Selector continuo en canvas con control de intensidad, código HEX directo y accesos rápidos preconfigurados:
+<p align="center">
+  <img src="docs/screenshots/04-color-fijo-hsv.png" alt="Modo Color Fijo con Rueda HSV" width="90%" />
+</p>
+
+### 5. Efectos Algorítmicos y Visualizador de Audio (WASAPI Loopback)
+12 patrones procedurales a 40 FPS y efectos reactivos al audio del sistema con control de velocidad y sensibilidad:
+<p align="center">
+  <img src="docs/screenshots/05-efectos-audio-visualizer.png" alt="Efectos Algorítmicos y Audio Visualizer" width="90%" />
+</p>
+
+---
+
 ## Caracteristicas Principales
 
 ### 1. Motor Ambilight Inteligente
@@ -94,6 +128,8 @@ CosmoLights/
 |-- package.json                  # Dependencias frontend (React, Vite, Lucide)
 |-- vite.config.js                # Configuracion de empaquetado single-file de Vite
 |-- run_cosmolights.bat           # Lanzador rapido para desarrollo
+|-- docs/
+|   `-- screenshots/              # Capturas de pantalla del funcionamiento de la interfaz
 |-- packaging/
 |   |-- installer.iss             # Script de Inno Setup 6 para el instalador
 |   `-- version_info.txt          # Metadatos de version para Windows
